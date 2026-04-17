@@ -71,23 +71,77 @@ Run this checklist locally (CI will catch failures, but fix them before pushing)
 
 ## Adding a New Tool
 
-1. Create `src/tools/myTool.ts` — use the factory pattern:
-   ```typescript
-   export function createMyTool(workspace: string, deps: MyDeps) {
-     return {
-       schema: { name: "myTool", description: "...", inputSchema: { ... }, outputSchema: { ... } },
-       handler: async (params) => { ... }
-     };
-   }
-   ```
-2. All descriptions ≤200 chars (CI enforces via `audit-lsp-tools.mjs`)
-3. Add `outputSchema` — required for all new tools
-4. Register in `src/tools/index.ts`
-5. Add to `SLIM_TOOL_NAMES` Set if it should be available in slim mode
-6. Write unit tests in `src/tools/__tests__/myTool.test.ts`
-7. Run the pre-PR checklist above
+### 1. Create the file
 
-See `documents/styleguide.md` for full conventions.
+Location: `src/tools/<toolName>.ts` (flat — no subdirectory unless joining an existing group like `src/tools/github/`). Factory pattern, one tool per exported function:
+
+```typescript
+import { successStructured, error } from "./utils.js";
+
+export function createMyTool(workspace: string, deps: MyDeps) {
+  return {
+    schema: {
+      name: "myTool",                       // camelCase, ^[a-zA-Z0-9_]+$
+      description: "One-line summary…",     // ≤ 200 chars (CI-enforced)
+      annotations: { readOnlyHint: true },  // omit for write tools
+      extensionRequired: true,              // only if the VS Code extension is mandatory
+      inputSchema: { type: "object", additionalProperties: false, properties: { … }, required: [] },
+      outputSchema: { type: "object", properties: { … }, required: [] },  // MANDATORY
+    },
+    async handler(args: Record<string, unknown>, signal?: AbortSignal) {
+      return successStructured({ /* must match outputSchema */ });
+    },
+  };
+}
+```
+
+### 2. Schema rules
+
+- **`name`** matches `/^[a-zA-Z0-9_]+$/`
+- **`description`** ≤ 200 chars — `tools/list` is sent on every MCP request; short descriptions keep prompt-cache hits
+- **`outputSchema` is mandatory** — `scripts/audit-lsp-tools.mjs` fails CI if missing (allowlist at `scripts/audit-output-schema-allowlist.json` is ratcheted; new entries rejected)
+- **Return helpers** in `src/tools/utils.ts`:
+  - `successStructured(data)` / `successStructuredLarge(data)` — auto-populates `structuredContent` (required when `outputSchema` declared)
+  - `error(msg, code)` — auto-fills `suggestion` from `src/errors/messages.ts` when `code` matches a catalog entry; use codes from `ToolErrorCodes`
+  - `extensionRequired(feature, alternatives?)` — standard message for disconnected-extension errors
+- **Extension-dependent tools** set `extensionRequired: true`. Tools that work headless via fallback set `extensionFallback: true` instead
+
+### 3. Register
+
+- Import and add to the tools array in `src/tools/index.ts`
+- Add to `SLIM_TOOL_NAMES` if it should be exposed when the bridge runs with `--slim`
+- If LSP-backed, add to `availableTools.lsp` in `src/tools/getToolCapabilities.ts`
+- New error codes go in `src/errors.ts` (`ToolErrorCodes`) and must have a catalog entry in `src/errors/messages.ts`
+
+### 4. Tests
+
+`src/tools/__tests__/<toolName>.test.ts`, at minimum:
+- happy path with valid args (asserts `structuredContent` shape matches `outputSchema`)
+- argument validation (missing/bad types → `invalid_args`)
+- disconnected-extension path (if `extensionRequired: true`) → `isError: true, code: "extension_required"`
+
+Coverage gates: 75% lines, 70% branches, 75% functions. Run with `npm run test:coverage`.
+
+### 5. CI gates you must pass
+
+```bash
+npm run lint:fix            # biome auto-fix
+npm run typecheck           # tsc --noEmit
+npm test                    # vitest
+node scripts/audit-lsp-tools.mjs      # registry + outputSchema + description-length
+node scripts/audit-shape-safety.mjs   # no new proxy<T> usage
+npm run schema:update       # regenerate documents/tool-schemas-snapshot.json if shape changed
+npm run docs:tools          # regenerate docs/tool-reference.md
+```
+
+The last two are CI-enforced via drift checks — `schema:check` and `docs:tools:check`. If either fails locally, commit the regenerated file.
+
+### 6. See also
+
+- `documents/styleguide.md` — full output-format and naming conventions
+- [`docs/tool-reference.md`](docs/tool-reference.md) — auto-generated catalog of every registered tool
+- `docs/adr/0004-tool-errors-as-content.md` — `isError:true` vs JSON-RPC errors
+- CLAUDE.md → **LSP Workflows** — discovery patterns when adding LSP-flavored tools
 
 ## Adding an Extension Handler
 

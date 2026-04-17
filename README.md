@@ -44,6 +44,15 @@ After `init`, type `/mcp` in Claude Code to confirm the bridge is connected. Typ
 
 > **One bridge per workspace.** Each project runs its own bridge instance on its own port. Start a separate `claude-ide-bridge --watch` in each directory.
 
+### Non-VS Code / headless users
+
+```bash
+npx claude-ide-bridge@latest init --headless
+claude-ide-bridge --watch --full
+```
+
+Skips extension install, recommends full mode. LSP falls back to `typescript-language-server` if installed globally. See [docs/headless-quickstart.md](docs/headless-quickstart.md).
+
 ### Installing the VS Code extension separately
 
 ```bash
@@ -56,7 +65,7 @@ Or search **Claude IDE Bridge** in the VS Code / Cursor / Windsurf marketplace.
 
 ## Tool Categories
 
-> **Discovering tools at runtime**: ask Claude "call `getToolCapabilities`" in any connected session, type `/mcp` in Claude Code for live server state, or run `claude-ide-bridge list-tools` from the shell for a quick category summary. Full reference: [`documents/platform-docs.md`](documents/platform-docs.md).
+> **Discovering tools at runtime**: ask Claude "call `getToolCapabilities`" in any connected session, type `/mcp` in Claude Code for live server state, or run `claude-ide-bridge list-tools` from the shell for a quick category summary. Full reference: [`documents/platform-docs.md`](documents/platform-docs.md). Auto-generated tool table: [`docs/tool-reference.md`](docs/tool-reference.md).
 
 | Category | Count | Example tools | Mode |
 |---|---|---|---|
@@ -352,3 +361,19 @@ claude-ide-bridge print-token   # confirms bridge is running
 ```
 
 Per the project's bug fix protocol: a reproducing test must exist before a fix lands.
+
+---
+
+## Powered-by badge
+
+Using Claude IDE Bridge in a plugin, companion tool, or blog post? Drop in the badge:
+
+```markdown
+[![Powered by Claude IDE Bridge](https://img.shields.io/badge/Powered%20by-Claude%20IDE%20Bridge-5A6FE0?logo=visualstudiocode&logoColor=white)](https://github.com/Oolab-labs/claude-ide-bridge)
+```
+
+```html
+<a href="https://github.com/Oolab-labs/claude-ide-bridge"><img src="https://img.shields.io/badge/Powered%20by-Claude%20IDE%20Bridge-5A6FE0?logo=visualstudiocode&logoColor=white" alt="Powered by Claude IDE Bridge"></a>
+```
+
+[![Powered by Claude IDE Bridge](https://img.shields.io/badge/Powered%20by-Claude%20IDE%20Bridge-5A6FE0?logo=visualstudiocode&logoColor=white)](https://github.com/Oolab-labs/claude-ide-bridge)

@@ -24,6 +24,7 @@ const SNAPSHOT_PATH = path.join(
   "tool-schemas-snapshot.json",
 );
 const CHANGELOG_PATH = path.join(ROOT, "documents", "tool-schema-changelog.md");
+const HISTORY_PATH = path.join(ROOT, "documents", "schema-history.json");
 
 const UPDATE = process.argv.includes("--update");
 const QUIET = process.argv.includes("--quiet");
@@ -112,11 +113,98 @@ current.sort((a, b) => a.name.localeCompare(b.name));
 // ── Update mode: write snapshot and exit ─────────────────────────────────────
 
 if (UPDATE) {
+  // Compute diff vs previous baseline (if any) so we can append to
+  // schema-history.json with structured change entries.
+  const historyChanges = [];
+  if (fs.existsSync(SNAPSHOT_PATH)) {
+    const prior = JSON.parse(fs.readFileSync(SNAPSHOT_PATH, "utf8"));
+    const priorMap = new Map(prior.map((t) => [t.name, t]));
+    const currentMap = new Map(current.map((t) => [t.name, t]));
+
+    for (const { name } of prior) {
+      if (!currentMap.has(name)) {
+        historyChanges.push({
+          type: "breaking",
+          tool: name,
+          change: "removed",
+        });
+      }
+    }
+    for (const { name } of current) {
+      if (!priorMap.has(name)) {
+        historyChanges.push({ type: "additive", tool: name, change: "added" });
+      }
+    }
+    for (const curr of current) {
+      const base = priorMap.get(curr.name);
+      if (!base) continue;
+      const baseReq = new Set(base.inputSchema?.required ?? []);
+      const currReq = new Set(curr.inputSchema?.required ?? []);
+      for (const p of baseReq)
+        if (!currReq.has(p))
+          historyChanges.push({
+            type: "breaking",
+            tool: curr.name,
+            change: `removed-required-param:${p}`,
+          });
+      for (const p of currReq)
+        if (!baseReq.has(p))
+          historyChanges.push({
+            type: "breaking",
+            tool: curr.name,
+            change: `added-required-param:${p}`,
+          });
+      const baseProps = Object.keys(base.inputSchema?.properties ?? {});
+      const currProps = new Set(
+        Object.keys(curr.inputSchema?.properties ?? {}),
+      );
+      for (const p of baseProps)
+        if (!currProps.has(p))
+          historyChanges.push({
+            type: "breaking",
+            tool: curr.name,
+            change: `removed-param:${p}`,
+          });
+      for (const p of currProps)
+        if (!baseProps.includes(p))
+          historyChanges.push({
+            type: "additive",
+            tool: curr.name,
+            change: `added-param:${p}`,
+          });
+    }
+  }
+
   fs.mkdirSync(path.dirname(SNAPSHOT_PATH), { recursive: true });
   fs.writeFileSync(SNAPSHOT_PATH, `${JSON.stringify(current, null, 2)}\n`);
   console.log(
     `[schema-audit] Snapshot updated: ${current.length} tools → ${SNAPSHOT_PATH}`,
   );
+
+  if (historyChanges.length > 0 && fs.existsSync(HISTORY_PATH)) {
+    const history = JSON.parse(fs.readFileSync(HISTORY_PATH, "utf8"));
+    const pkgVersion = JSON.parse(
+      fs.readFileSync(path.join(ROOT, "package.json"), "utf8"),
+    ).version;
+    history.entries ??= [];
+    history.entries.push({
+      packageVersion: pkgVersion,
+      protocolVersion: history.protocolVersion,
+      date: new Date().toISOString().slice(0, 10),
+      description: "(fill in before commit — summarize the rationale)",
+      changes: historyChanges,
+    });
+    fs.writeFileSync(HISTORY_PATH, `${JSON.stringify(history, null, 2)}\n`);
+    const breaking = historyChanges.filter((c) => c.type === "breaking").length;
+    console.log(
+      `[schema-audit] History appended: ${historyChanges.length} change(s), ${breaking} breaking → ${HISTORY_PATH}`,
+    );
+    if (breaking > 0) {
+      console.log(
+        "[schema-audit] WARNING: breaking changes detected — bump BRIDGE_PROTOCOL_VERSION in src/version.ts and update description in schema-history.json before committing.",
+      );
+    }
+  }
   process.exit(0);
 }
 

@@ -78,6 +78,8 @@ jobs:
         run: node scripts/audit-lsp-tools.mjs
       - name: Audit shape safety (proxy<T> usage)
         run: node scripts/audit-shape-safety.mjs
+      - name: Verify docs/tool-reference.md is up to date
+        run: node scripts/gen-tool-reference.mjs --check
 
   plugin-validate:
     name: Validate plugin manifest

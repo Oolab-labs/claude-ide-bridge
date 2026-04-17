@@ -28,6 +28,7 @@ import { Server } from "./server.js";
 import { type CheckpointData, SessionCheckpoint } from "./sessionCheckpoint.js";
 import { StreamableHttpHandler } from "./streamableHttp.js";
 import { initTelemetry, shutdownTelemetry } from "./telemetry.js";
+import { categorize } from "./toolCategories.js";
 import { readNote, writeNote } from "./tools/handoffNote.js";
 import { registerAllTools } from "./tools/index.js";
 import { cleanupTempDirs } from "./tools/openDiff.js";
@@ -959,10 +960,71 @@ export class Bridge {
       if (!this.extensionClient.isConnected())
         signals.push("Extension disconnected");
       score = Math.max(0, Math.min(100, score));
+      const perCategory: Record<
+        string,
+        {
+          p50: number;
+          p95: number;
+          p99: number;
+          calls: number;
+          sampleCount: number;
+        }
+      > = {};
+      const catBuckets: Record<string, { durations: number[]; calls: number }> =
+        {};
+      for (const [tool, pct] of Object.entries(allPercentiles)) {
+        const cat = categorize(tool);
+        const bucket = catBuckets[cat] ?? { durations: [], calls: 0 };
+        const ws = windowedS[tool];
+        bucket.calls += ws?.count ?? 0;
+        if (ws?.avgDurationMs) {
+          for (let i = 0; i < (pct.sampleCount || 0); i++)
+            bucket.durations.push(ws.avgDurationMs);
+        }
+        bucket.durations.push(pct.p50, pct.p95, pct.p99);
+        catBuckets[cat] = bucket;
+      }
+      for (const [cat, b] of Object.entries(catBuckets)) {
+        const sorted = [...b.durations].sort((a, z) => a - z);
+        const pick = (p: number) => {
+          if (!sorted.length) return 0;
+          const idx = Math.min(
+            sorted.length - 1,
+            Math.floor((p / 100) * sorted.length),
+          );
+          return sorted[idx] ?? 0;
+        };
+        perCategory[cat] = {
+          p50: pick(50),
+          p95: pick(95),
+          p99: pick(99),
+          calls: b.calls,
+          sampleCount: sorted.length,
+        };
+      }
       return {
-        latency: { perTool, overallP95Ms },
+        latency: { perTool, perCategory, overallP95Ms },
         health: { score, signals },
       };
+    };
+    this.server.activityDataFn = () => {
+      const timeline = this.activityLog.queryTimeline({ last: 30 });
+      return timeline.map((e) => {
+        if (e.kind === "tool") {
+          return {
+            kind: "tool" as const,
+            at: e.timestamp,
+            tool: e.tool,
+            durationMs: e.durationMs,
+            status: e.status,
+          };
+        }
+        return {
+          kind: "lifecycle" as const,
+          at: e.timestamp,
+          event: e.event,
+        };
+      });
     };
     this.server.analyticsFn = async (windowHours?: number) => {
       const wh =
@@ -1447,7 +1509,7 @@ export class Bridge {
       try {
         await Promise.race([
           Promise.resolve().then(() =>
-            this.checkpoint!.write(this._buildCheckpoint(this.port)),
+            this.checkpoint?.write(this._buildCheckpoint(this.port)),
           ),
           new Promise<void>((resolve) => setTimeout(resolve, 3000)),
         ]);

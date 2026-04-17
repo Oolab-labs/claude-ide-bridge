@@ -1,0 +1,100 @@
+name: Weekly dependency audit
+
+on:
+  schedule:
+    # Every Monday at 12:00 UTC
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies (no scripts)
+        run: npm ci --ignore-scripts
+
+      - name: Run npm audit (high + critical only)
+        id: audit
+        run: |
+          set +e
+          npm audit --json --audit-level=high > audit.json
+          AUDIT_EXIT=$?
+          set -e
+
+          HIGH=$(jq -r '.metadata.vulnerabilities.high // 0' audit.json)
+          CRITICAL=$(jq -r '.metadata.vulnerabilities.critical // 0' audit.json)
+          TOTAL=$((HIGH + CRITICAL))
+
+          echo "high=$HIGH" >> "$GITHUB_OUTPUT"
+          echo "critical=$CRITICAL" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "exit_code=$AUDIT_EXIT" >> "$GITHUB_OUTPUT"
+
+          echo "## Vulnerability summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Critical: $CRITICAL" >> "$GITHUB_STEP_SUMMARY"
+          echo "- High: $HIGH" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload full audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-audit-${{ github.run_id }}
+          path: audit.json
+          retention-days: 30
+
+      - name: Open / update issue for critical findings
+        if: steps.audit.outputs.total != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CRITICAL: ${{ steps.audit.outputs.critical }}
+          HIGH: ${{ steps.audit.outputs.high }}
+        run: |
+          TITLE="Dependency audit: $CRITICAL critical / $HIGH high"
+
+          # Ensure labels exist (idempotent — ignore failures if already present)
+          gh label create "security" --color "d73a4a" --description "Security issue" 2>/dev/null || true
+          gh label create "deps" --color "0366d6" --description "Dependency update" 2>/dev/null || true
+
+          # Dedupe: find an open issue with the same title
+          EXISTING=$(gh issue list --state open --label security,deps --search "$TITLE in:title" --json number,title --jq '.[] | select(.title == "'"$TITLE"'") | .number' | head -n1)
+
+          BODY=$(cat <<EOF
+          **Weekly \`npm audit\` found $CRITICAL critical and $HIGH high-severity advisories.**
+
+          Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Full report attached as \`npm-audit-${{ github.run_id }}\` artifact.
+
+          \`\`\`json
+          $(jq '.vulnerabilities | to_entries | map({name: .key, severity: .value.severity, via: (.value.via | if type=="array" then map(if type=="object" then .title else . end) else [.] end)}) | .[0:20]' audit.json)
+          \`\`\`
+
+          _Automated by \`.github/workflows/dependency-audit.yml\`._
+          EOF
+          )
+
+          if [ -n "$EXISTING" ]; then
+            echo "Updating existing issue #$EXISTING"
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            echo "Creating new issue: $TITLE"
+            gh issue create --title "$TITLE" --body "$BODY" --label "security,deps"
+          fi
+
+      - name: Fail job on critical findings
+        if: steps.audit.outputs.critical != '0'
+        run: |
+          echo "::error::$((${{ steps.audit.outputs.critical }})) critical vulnerability(s) — see filed issue"
+          exit 1

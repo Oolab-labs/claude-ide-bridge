@@ -25,8 +25,9 @@ import type {
   PluginRegistration,
   PluginToolRegistration,
 } from "./plugin.js";
+import { majorOf, satisfies } from "./semver.js";
 import type { ToolHandler, ToolSchema } from "./transport.js";
-import { PACKAGE_VERSION } from "./version.js";
+import { BRIDGE_PROTOCOL_VERSION, PACKAGE_VERSION } from "./version.js";
 
 const MANIFEST_FILE = "claude-ide-bridge-plugin.json";
 const SUPPORTED_SCHEMA_VERSION = 1;
@@ -92,6 +93,38 @@ function validateManifest(
   }
   if (m.version !== undefined && typeof m.version !== "string") {
     return { ok: false, reason: '"version" must be a string if present' };
+  }
+  if (
+    m.requiresProtocolVersion !== undefined &&
+    typeof m.requiresProtocolVersion !== "string"
+  ) {
+    return {
+      ok: false,
+      reason: '"requiresProtocolVersion" must be a string if present',
+    };
+  }
+  if (typeof m.requiresProtocolVersion === "string") {
+    const required = m.requiresProtocolVersion;
+    if (!satisfies(BRIDGE_PROTOCOL_VERSION, required)) {
+      const bridgeMajor = majorOf(BRIDGE_PROTOCOL_VERSION);
+      const reqMajor = (() => {
+        const stripped = required.replace(/^[~^]|^>=/, "").trim();
+        return majorOf(stripped);
+      })();
+      if (
+        bridgeMajor !== null &&
+        reqMajor !== null &&
+        bridgeMajor !== reqMajor
+      ) {
+        return {
+          ok: false,
+          reason: `plugin requires bridge protocol ${required} but this bridge is ${BRIDGE_PROTOCOL_VERSION} (cross-major — hard fail)`,
+        };
+      }
+      // Same-major minor mismatch: log and proceed (warning handled by caller)
+      (m as Record<string, unknown>).__protocolMismatchWarning =
+        `plugin wants ${required}, bridge is ${BRIDGE_PROTOCOL_VERSION} — tool behavior may differ`;
+    }
   }
   if (
     m.permissions !== undefined &&
@@ -259,6 +292,13 @@ export async function loadOnePluginFull(
     return null;
   }
   const manifest = validation.manifest;
+  const warning = (manifest as unknown as Record<string, unknown>)
+    .__protocolMismatchWarning;
+  if (typeof warning === "string") {
+    logger.warn(`Plugin "${manifest.name}" — ${warning}`);
+    delete (manifest as unknown as Record<string, unknown>)
+      .__protocolMismatchWarning;
+  }
 
   // 3. Version check
   if (

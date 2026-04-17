@@ -60,6 +60,17 @@ export function renderDashboardHtml(version: string): string {
     <tbody id="latency-rows"></tbody>
   </table>
 </div>
+<div class="events" id="category-section" style="display:none;margin-bottom:16px">
+  <h2>Latency by Category</h2>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="color:var(--muted)"><th style="text-align:left;padding:4px 6px">Category</th><th style="text-align:right;padding:4px 6px">p50</th><th style="text-align:right;padding:4px 6px">p95</th><th style="text-align:right;padding:4px 6px">p99</th><th style="text-align:right;padding:4px 6px">Calls</th></tr></thead>
+    <tbody id="category-rows"></tbody>
+  </table>
+</div>
+<div class="events" id="activity-section" style="display:none;margin-bottom:16px">
+  <h2>Recent Activity</h2>
+  <div id="activity-rows"></div>
+</div>
 <div class="events">
   <h2>Recent Events</h2>
   <div id="events"><div class="event-row"><span class="event-msg" style="color:var(--muted)">Loading&hellip;</span></div></div>
@@ -121,6 +132,42 @@ async function refresh() {
             '</tr>';
         }).join('');
       }
+    }
+
+    // Per-category latency
+    var perCategory = d.perf && d.perf.latency && d.perf.latency.perCategory ? d.perf.latency.perCategory : {};
+    var cats = Object.entries(perCategory).filter(function(e){return e[1].sampleCount > 0;}).sort(function(a,b){return b[1].p95 - a[1].p95;});
+    if (cats.length > 0) {
+      document.getElementById('category-section').style.display = '';
+      document.getElementById('category-rows').innerHTML = cats.map(function(e) {
+        var c = e[0]; var v = e[1];
+        return '<tr style="border-top:1px solid var(--border)">' +
+          '<td style="padding:3px 6px">' + c + '</td>' +
+          '<td style="text-align:right;padding:3px 6px">' + (v.p50||0) + 'ms</td>' +
+          '<td style="text-align:right;padding:3px 6px">' + (v.p95||0) + 'ms</td>' +
+          '<td style="text-align:right;padding:3px 6px">' + (v.p99||0) + 'ms</td>' +
+          '<td style="text-align:right;padding:3px 6px">' + (v.calls||0) + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+
+    // Recent activity feed
+    var actEl = document.getElementById('activity-rows');
+    if (d.activity && d.activity.length > 0) {
+      document.getElementById('activity-section').style.display = '';
+      actEl.innerHTML = d.activity.slice().reverse().map(function(a) {
+        var t = new Date(a.at).toLocaleTimeString();
+        var label, color;
+        if (a.kind === 'tool') {
+          label = a.tool + ' — ' + a.durationMs + 'ms';
+          color = a.status === 'error' ? 'var(--red)' : 'var(--green)';
+        } else {
+          label = a.event;
+          color = 'var(--blue)';
+        }
+        return '<div class="event-row"><span class="event-time">' + t + '</span>' +
+          '<span class="event-msg" style="color:' + color + '">' + label.replace(/</g,'&lt;') + '</span></div>';
+      }).join('');
     }
 
     const evEl = document.getElementById('events');

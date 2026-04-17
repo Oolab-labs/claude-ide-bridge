@@ -1,0 +1,5 @@
+{
+  "protocolVersion": "1.1.0",
+  "note": "Append-only history of schema changes. Auto-appended by `npm run schema:update` when non-empty diff detected; humans can edit `description` before commit. Consumers: plugin authors set `requiresProtocolVersion` in their manifest to pin against a known-good protocol version.",
+  "entries": []
+}

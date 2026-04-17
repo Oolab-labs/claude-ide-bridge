@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
+import { lookupErrorCatalog } from "../errors/messages.js";
 import type { AbsPath } from "../fp/brandedTypes.js";
 
 const execFileAsync = promisify(execFile);
@@ -305,6 +306,10 @@ export function error(
     payload = { ...data };
   }
   if (code !== undefined) payload.code = code;
+  if (code !== undefined && payload.suggestion === undefined) {
+    const entry = lookupErrorCatalog(code);
+    if (entry) payload.suggestion = entry.suggestion;
+  }
   return {
     content: [{ type: "text", text: JSON.stringify(payload) }],
     isError: true,
