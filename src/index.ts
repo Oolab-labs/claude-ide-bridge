@@ -421,6 +421,69 @@ Options:
   process.exit(0);
 }
 
+// Handle cowork-prep subcommand — prints Cowork-handoff instructions
+// and discovers the running bridge so the user knows next actions.
+//   claude-ide-bridge cowork-prep
+if (process.argv[2] === "cowork-prep") {
+  const cwpLockDir = path.join(
+    process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"),
+    "ide",
+  );
+  let running = false;
+  let runningPort: number | undefined;
+  try {
+    for (const f of readdirSync(cwpLockDir)) {
+      if (!f.endsWith(".lock")) continue;
+      const full = path.join(cwpLockDir, f);
+      try {
+        const d = JSON.parse(readFileSync(full, "utf-8")) as {
+          isBridge?: boolean;
+          pid?: number;
+        };
+        if (d.isBridge && d.pid) {
+          try {
+            process.kill(d.pid, 0);
+            running = true;
+            runningPort = Number(path.basename(f, ".lock"));
+            break;
+          } catch {
+            /* stale lock — pid not alive */
+          }
+        }
+      } catch {
+        /* malformed lock file */
+      }
+    }
+  } catch {
+    /* no lock dir yet */
+  }
+
+  process.stdout.write(
+    "Cowork prep — bridge MCP tools are NOT reachable inside Cowork.\n\n",
+  );
+  if (running) {
+    process.stdout.write(
+      `  ✓ Bridge detected on port ${runningPort}.\n\n` +
+        "  1. In your regular Claude Code / Desktop chat (NOT Cowork), run:\n" +
+        "       /mcp__bridge__cowork\n" +
+        "     This gathers diagnostics + git status + open files and writes\n" +
+        "     a handoff note the Cowork session can read back.\n\n" +
+        "  2. Then open Cowork (Cmd+2 on Mac). Cowork will read the handoff note.\n\n" +
+        "Docs: docs/cowork.md\n",
+    );
+  } else {
+    process.stdout.write(
+      "  ✗ No running bridge found in ~/.claude/ide/*.lock\n\n" +
+        "  Start the bridge first:\n" +
+        "    claude-ide-bridge --watch\n\n" +
+        "  Then re-run this command, or invoke /mcp__bridge__cowork directly\n" +
+        "  in Claude Code once the bridge is connected.\n\n" +
+        "Docs: docs/cowork.md\n",
+    );
+  }
+  process.exit(running ? 0 : 1);
+}
+
 // Handle notify subcommand — called from CC hooks to fire bridge automation
 // Usage: claude-ide-bridge notify <CcEventName> [--cwd <p>] [--taskId <id>] [--prompt <t>] [--tool <n>] [--reason <r>] [--port <n>]
 if (process.argv[2] === "notify") {
@@ -1125,7 +1188,13 @@ Steps performed:
       `  1. Start the bridge:    claude-ide-bridge --watch   (runs in this workspace)\n` +
       "  2. Restart your IDE once so it picks up the new extension + MCP config.\n" +
       "  3. Open Claude Code and type /mcp — the claude-ide-bridge server should show as connected.\n" +
-      "  4. Type /ide to see live workspace state (open editors, diagnostics, git status).\n\n",
+      "  4. Type /ide to see live workspace state (open editors, diagnostics, git status).\n\n" +
+      "Cowork (computer-use) users — bridge MCP tools are NOT available inside Cowork.\n" +
+      "  Before switching to Cowork, run this in regular Claude Code/Desktop:\n" +
+      "    /mcp__bridge__cowork        (captures IDE context to a handoff note)\n" +
+      "  Or from the shell:\n" +
+      "    claude-ide-bridge cowork-prep\n" +
+      "  Docs: docs/cowork.md\n\n",
   );
 
   if (inWorktree) {
