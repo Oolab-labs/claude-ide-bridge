@@ -1,1 +1,2 @@
+bash scripts/check-extension-version-bump.sh
 npx lint-staged
