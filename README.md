@@ -56,6 +56,8 @@ Or search **Claude IDE Bridge** in the VS Code / Cursor / Windsurf marketplace.
 
 ## Tool Categories
 
+> **Discovering tools at runtime**: ask Claude "call `getToolCapabilities`" in any connected session, type `/mcp` in Claude Code for live server state, or run `claude-ide-bridge list-tools` from the shell for a quick category summary. Full reference: [`documents/platform-docs.md`](documents/platform-docs.md).
+
 | Category | Count | Example tools | Mode |
 |---|---|---|---|
 | LSP & Code Intelligence | 29 | `goToDefinition`, `findReferences`, `getCallHierarchy`, `getHover`, `explainSymbol` | S |

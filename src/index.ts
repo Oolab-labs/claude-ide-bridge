@@ -421,6 +421,46 @@ Options:
   process.exit(0);
 }
 
+// Handle list-tools subcommand — surfaces the (~170-tool) catalog that users
+// otherwise discover only by reading docs or calling getToolCapabilities.
+//   claude-ide-bridge list-tools
+if (process.argv[2] === "list-tools") {
+  process.stdout.write(
+    "Claude IDE Bridge — tool catalog (high level)\n\n" +
+      "Slim mode (default when --slim; always available)\n" +
+      "  LSP / navigation   goToDefinition, findReferences, getCallHierarchy,\n" +
+      "                     getDocumentSymbols, batchGetHover, explainSymbol,\n" +
+      "                     signatureHelp, getTypeHierarchy\n" +
+      "  Diagnostics        getDiagnostics, watchDiagnostics\n" +
+      "  Refactor           refactorAnalyze → refactorPreview → renameSymbol,\n" +
+      "                     refactorExtractFunction\n" +
+      "  Debug              setDebugBreakpoints, startDebugging, evaluateInDebugger\n" +
+      "  Bridge state       getBridgeStatus, getToolCapabilities, contextBundle\n" +
+      "  Editor             getOpenEditors, getHoverAtCursor, captureScreenshot\n" +
+      "\n" +
+      "Full mode (default since v2.43.0; opt out with --slim)\n" +
+      "  Git / GitHub       getGitStatus/Diff/Log, gitAdd/Commit/Push/Pull,\n" +
+      "                     githubCreatePR, githubListPRs, etc.\n" +
+      "  Terminal / shell   runInTerminal, getTerminalOutput, runCommand\n" +
+      "  Files / search     editText, searchAndReplace, findFiles, getFileTree\n" +
+      "  Testing / coverage runTests, getCodeCoverage, generateTests\n" +
+      "  Quality / audit    detectUnusedCode, getSecurityAdvisories,\n" +
+      "                     auditDependencies, getGitHotspots\n" +
+      "  Orchestration      runClaudeTask, listClaudeTasks, resumeClaudeTask\n" +
+      "  VS Code integ.     executeVSCodeCommand, listVSCodeTasks, runVSCodeTask\n" +
+      "  Continuity         setHandoffNote, getHandoffNote\n" +
+      "\n" +
+      "Live, authoritative list — pick one:\n" +
+      "  1. In Claude Code/Desktop, ask: 'Call getToolCapabilities.'\n" +
+      "  2. /mcp in Claude Code shows every connected MCP server + tool count.\n" +
+      "  3. curl -s http://127.0.0.1:<port>/tools — requires Bearer auth token\n" +
+      "     from ~/.claude/ide/<port>.lock (authToken field).\n" +
+      "\n" +
+      "Full reference: documents/platform-docs.md (170+ tools, categorized)\n",
+  );
+  process.exit(0);
+}
+
 // Handle cowork-prep subcommand — prints Cowork-handoff instructions
 // and discovers the running bridge so the user knows next actions.
 //   claude-ide-bridge cowork-prep
