@@ -221,7 +221,27 @@ const KNOWN_CONFIG_FILE_KEYS = new Set<string>([
  * Discovery order: $CLAUDE_IDE_BRIDGE_CONFIG → ./claude-ide-bridge.config.json → ~/.claude/ide/config.json
  * On any error (file not found, parse failure) logs a warning and returns {}.
  */
+/**
+ * Load and return both the partial config and the source path used.
+ * Prefer this over `loadConfigFile` for new callers — the caller can log
+ * the source so silent auto-discovery doesn't become a gotcha.
+ */
+export function loadConfigFileWithSource(configPath?: string): {
+  config: Partial<ConfigFile>;
+  sourcePath?: string;
+} {
+  const result = loadConfigFileInternal(configPath);
+  return result;
+}
+
 export function loadConfigFile(configPath?: string): Partial<ConfigFile> {
+  return loadConfigFileInternal(configPath).config;
+}
+
+function loadConfigFileInternal(configPath?: string): {
+  config: Partial<ConfigFile>;
+  sourcePath?: string;
+} {
   const candidates: string[] = [];
   if (configPath) {
     candidates.push(configPath);
@@ -248,7 +268,7 @@ export function loadConfigFile(configPath?: string): Partial<ConfigFile> {
         console.warn(
           `Warning: Config file ${candidate} is not a JSON object — ignored`,
         );
-        return {};
+        return { config: {} };
       }
       const obj = parsed as Record<string, unknown>;
       for (const key of Object.keys(obj)) {
@@ -272,15 +292,15 @@ export function loadConfigFile(configPath?: string): Partial<ConfigFile> {
           if (Number.isInteger(parsed)) obj[numKey] = parsed;
         }
       }
-      return obj as Partial<ConfigFile>;
+      return { config: obj as Partial<ConfigFile>, sourcePath: candidate };
     } catch (err) {
       console.warn(
         `Warning: Failed to parse config file ${candidate}: ${err instanceof Error ? err.message : String(err)} — ignored`,
       );
-      return {};
+      return { config: {} };
     }
   }
-  return {};
+  return { config: {} };
 }
 
 function requireArg(args: string[], i: number, flag: string): string {
@@ -294,10 +314,13 @@ function requireArg(args: string[], i: number, flag: string): string {
 export function parseConfig(argv: string[]): Config {
   const args = argv.slice(2);
 
-  // Find --config path before the main arg parse (lowest priority: loaded first)
+  // Find --config path and --no-config before the main arg parse
   let configFilePath: string | undefined;
+  let noConfig = false;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--config") {
+    if (args[i] === "--no-config") {
+      noConfig = true;
+    } else if (args[i] === "--config") {
       if (i + 1 >= args.length) {
         throw new Error("--config requires a path argument");
       }
@@ -305,10 +328,19 @@ export function parseConfig(argv: string[]): Config {
       if (configFilePath.length > 4096) {
         throw new Error("--config path is too long (max 4096 chars)");
       }
-      break;
     }
   }
-  const fileConfig = loadConfigFile(configFilePath);
+  if (noConfig && configFilePath) {
+    throw new Error("--no-config and --config are mutually exclusive");
+  }
+  const loaded = noConfig
+    ? { config: {} as Partial<ConfigFile> }
+    : loadConfigFileWithSource(configFilePath);
+  const fileConfig = loaded.config;
+  if (loaded.sourcePath) {
+    // Emit on stderr so stdio MCP transport (stdout) stays clean.
+    process.stderr.write(`[config] loaded ${loaded.sourcePath}\n`);
+  }
 
   // Defaults — config file values fill in where CLI/env don't override
   let workspace = fileConfig.workspace
@@ -460,6 +492,9 @@ export function parseConfig(argv: string[]): Config {
       case "--config":
         // Already consumed above to load config file; skip the value
         i++;
+        break;
+      case "--no-config":
+        // Already consumed above to skip config-file discovery; no value.
         break;
       case "--vps":
         vps = true;
@@ -654,6 +689,7 @@ Options:
   --allow-private-http      Allow sendHttpRequest to reach localhost/private IPs (for VPS where bridge runs alongside services)
   --auto-tmux               Auto-wrap in tmux session if not already inside one
   --config <path>           Load config file (default: ./claude-ide-bridge.config.json)
+  --no-config               Skip config file discovery entirely (ignore env + default paths)
   --verbose                 Enable debug logging
   --jsonl                   Emit structured JSONL events to stderr
   --version, -v             Print version and exit

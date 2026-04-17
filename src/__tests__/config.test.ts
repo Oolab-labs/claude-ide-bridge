@@ -1,14 +1,18 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("node:child_process", () => ({
   execFileSync: vi.fn(),
 }));
 
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import {
   DB_ALLOWLIST_EXTRAS,
   findEditor,
   ideNameFromEditor,
+  loadConfigFileWithSource,
   parseConfig,
 } from "../config.js";
 
@@ -367,5 +371,65 @@ describe("parseConfig expanded VPS extras", () => {
     ]) {
       expect(config.commandAllowlist).toContain(cmd);
     }
+  });
+});
+
+describe("loadConfigFileWithSource + --no-config", () => {
+  let tmp: string;
+  let cfg: string;
+  let origCwd: string;
+  let origStderr: typeof process.stderr.write;
+  let stderrCapture: string;
+
+  beforeEach(() => {
+    tmp = mkdtempSync(path.join(tmpdir(), "bridge-cfg-"));
+    cfg = path.join(tmp, "claude-ide-bridge.config.json");
+    writeFileSync(cfg, JSON.stringify({ ideName: "FromFile" }));
+    origCwd = process.cwd();
+    process.chdir(tmp);
+    stderrCapture = "";
+    origStderr = process.stderr.write;
+    process.stderr.write = ((s: unknown) => {
+      stderrCapture += String(s);
+      return true;
+    }) as typeof process.stderr.write;
+  });
+  afterEach(() => {
+    process.stderr.write = origStderr;
+    process.chdir(origCwd);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("returns sourcePath when a config file is found", () => {
+    const result = loadConfigFileWithSource();
+    expect(result.config.ideName).toBe("FromFile");
+    // macOS /var ↔ /private/var symlink, match by basename/suffix
+    expect(result.sourcePath).toMatch(/claude-ide-bridge\.config\.json$/);
+  });
+
+  it("returns undefined sourcePath when no file exists", () => {
+    rmSync(cfg);
+    const result = loadConfigFileWithSource();
+    expect(result.sourcePath).toBeUndefined();
+    expect(result.config).toEqual({});
+  });
+
+  it("parseConfig logs [config] loaded on stderr when discovering", () => {
+    parseConfig(["node", "bridge"]);
+    expect(stderrCapture).toContain("[config] loaded ");
+    expect(stderrCapture).toContain(cfg);
+  });
+
+  it("--no-config skips discovery entirely", () => {
+    const config = parseConfig(["node", "bridge", "--no-config"]);
+    // The file would have set ideName=FromFile; skipped → default
+    expect(config.ideName).not.toBe("FromFile");
+    expect(stderrCapture).not.toContain("[config] loaded");
+  });
+
+  it("--no-config + --config is rejected", () => {
+    expect(() =>
+      parseConfig(["node", "bridge", "--no-config", "--config", cfg]),
+    ).toThrow(/mutually exclusive/);
   });
 });
