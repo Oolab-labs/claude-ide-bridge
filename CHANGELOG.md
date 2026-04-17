@@ -10,6 +10,26 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.45.0] — 2026-04-17
+
+### Added
+- **`claude-ide-bridge list-tools`** subcommand prints slim/full tool catalog + three live-introspection paths.
+- **`claude-ide-bridge cowork-prep`** subcommand detects a running bridge and prints exact `/mcp__bridge__cowork` steps; exits 1 when no bridge is running.
+- **`init` Next Steps** now includes a dedicated Cowork block for every user, pointing at both the prompt and `cowork-prep`.
+- **`--no-config` flag** skips config-file discovery entirely; mutually exclusive with `--config`.
+- **`loadConfigFileWithSource()`** returns `{config, sourcePath}`; legacy `loadConfigFile()` kept.
+- **README "Tool Categories" preface** points at `list-tools` / `getToolCapabilities` / `/mcp` for runtime discovery.
+- **`scripts/check-extension-version-bump.sh`** pre-commit hook blocks commits that change `vscode-extension/{src,tsconfig,esbuild,biome}` without bumping `vscode-extension/package.json` — catches the Windsurf `.vsix` cache footgun at commit time.
+
+### Changed
+- **`init` failure reporting.** Silent `[warn]` entries for extension install, MCP shim, and PATH failures now tag `[FAILED]` inline and surface in a grouped critical/optional summary. Exit 1 on any critical failure, so CI and provisioning scripts stop on real problems instead of reading "✅ Setup complete" over hidden errors.
+- **Config discovery is no longer silent.** Startup writes `[config] loaded <path>` to stderr when a config file is auto-discovered. Avoids the "wrong policy silently in effect" gotcha when a stale file is shadowed from a parent directory. Stdout stays clean for the stdio MCP transport.
+
+### Tests
+- +5 in `src/__tests__/config.test.ts` covering `loadConfigFileWithSource`, stderr log, `--no-config`, and mutual-exclusion guard.
+
+---
+
 ## [2.43.0] — 2026-04-16
 
 ### Changed
