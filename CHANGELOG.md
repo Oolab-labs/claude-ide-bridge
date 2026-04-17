@@ -10,6 +10,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [2.45.1] — 2026-04-17
+
+### Fixed
+- **`init` verification honors `CLAUDE_CONFIG_DIR`.** Two hardcoded `~/.claude*` reads in the final verification step caused false-negative "✗ MCP shim not found" / "✗ CC hooks not wired" warnings when users set `CLAUDE_CONFIG_DIR` (CI sandboxes, multi-tenant setups). Writes already honored the env var; verification now matches.
+- **CC hooks verifier handles nested entry shape.** `init` writes hooks in CC's `{matcher, hooks: [{command}]}` format but the verifier checked for a flat top-level `command`, silently reporting hooks as unwired even on clean installs where the file was written correctly. Verifier now matches both legacy flat and nested shapes.
+- **Verification output shows resolved paths** when `CLAUDE_CONFIG_DIR` is set; default case still prints `~/.claude…` for stable output.
+
+### Added
+- `getClaudeConfigDir()` / `getClaudeJsonPath()` helpers in `src/index.ts` so all four init sites use one source of truth. Pattern hoisted to `src/config.ts` in a later pass.
+- +1 test: `init --workspace` honors `CLAUDE_CONFIG_DIR` — confirms writes land at custom paths AND verification reports ✓ not ✗.
+
+---
+
 ## [2.45.0] — 2026-04-17
 
 ### Added

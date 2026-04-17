@@ -818,6 +818,32 @@ export function register(ctx) {
 }
 
 // Handle init subcommand — one-command setup: install extension + write CLAUDE.md + print next steps
+/**
+ * Resolve the Claude config directory, honoring CLAUDE_CONFIG_DIR.
+ * Default: ~/.claude
+ */
+function getClaudeConfigDir(): string {
+  return process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
+}
+
+/**
+ * Resolve the path to .claude.json (MCP registry). Sibling of the config
+ * directory: `<dir>.json`. Matches the init write-side convention — see the
+ * long comment around the original ghost-file bugfix.
+ */
+function getClaudeJsonPath(): string {
+  return path.resolve(`${getClaudeConfigDir()}.json`);
+}
+
+/**
+ * When CLAUDE_CONFIG_DIR is set, users expect messages to show the real
+ * path; otherwise the familiar "~/.claude/..." form keeps output stable for
+ * the default case.
+ */
+function claudeConfigDirIsCustom(): boolean {
+  return !!process.env.CLAUDE_CONFIG_DIR;
+}
+
 if (process.argv[2] === "init") {
   const argv = process.argv.slice(3);
 
@@ -1070,9 +1096,7 @@ Steps performed:
   // dotted prefix. Earlier versions computed `path.join(CONFIG_DIR, "..", "claude.json")`
   // which dropped the leading dot and wrote to ~/claude.json — a ghost file that Claude
   // Code never reads. Append ".json" to the config dir path instead.
-  const claudeDirForJson =
-    process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude");
-  const claudeJsonAbs = path.resolve(`${claudeDirForJson}.json`);
+  const claudeJsonAbs = getClaudeJsonPath();
   try {
     let claudeJson: Record<string, unknown> = {};
     if (existsSync(claudeJsonAbs)) {
@@ -1105,10 +1129,7 @@ Steps performed:
   }
 
   // Step 3b: Wire CC hooks in ~/.claude/settings.json
-  const ccSettingsPath = path.join(
-    process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"),
-    "settings.json",
-  );
+  const ccSettingsPath = path.join(getClaudeConfigDir(), "settings.json");
   const CC_HOOK_NOTIFY_CMDS: Record<string, string> = {
     PreCompact: "claude-ide-bridge notify PreCompact",
     PostCompact: "claude-ide-bridge notify PostCompact",
@@ -1264,7 +1285,7 @@ Steps performed:
 
   let mcpWired = false;
   try {
-    const claudeJsonPath = path.join(os.homedir(), ".claude.json");
+    const claudeJsonPath = getClaudeJsonPath();
     const cj = JSON.parse(readFileSync(claudeJsonPath, "utf-8")) as Record<
       string,
       unknown
@@ -1277,53 +1298,69 @@ Steps performed:
   } catch {
     /* file may not exist yet — non-fatal */
   }
+  const claudeJsonLabel = claudeConfigDirIsCustom()
+    ? getClaudeJsonPath()
+    : "~/.claude.json";
   process.stdout.write(
     mcpWired
-      ? "  ✓ MCP shim registered in ~/.claude.json\n"
-      : "  ✗ MCP shim not found in ~/.claude.json — re-run init or check Step 3 output above\n",
+      ? `  ✓ MCP shim registered in ${claudeJsonLabel}\n`
+      : `  ✗ MCP shim not found in ${claudeJsonLabel} — re-run init or check Step 3 output above\n`,
   );
   if (!mcpWired) {
     initFailures.push({
       step: "MCP shim registration",
-      detail: "claude-ide-bridge entry missing from ~/.claude.json mcpServers",
-      fix: "Re-run `claude-ide-bridge init`. If the problem persists, inspect ~/.claude.json and Step 3 output above for the specific write error.",
+      detail: `claude-ide-bridge entry missing from ${claudeJsonLabel} mcpServers`,
+      fix: `Re-run \`claude-ide-bridge init\`. If the problem persists, inspect ${claudeJsonLabel} and Step 3 output above for the specific write error.`,
       severity: "critical",
     });
   }
 
   let hooksWired = false;
   try {
-    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+    const settingsPath = path.join(getClaudeConfigDir(), "settings.json");
     const sj = JSON.parse(readFileSync(settingsPath, "utf-8")) as Record<
       string,
       unknown
     >;
     const hooksObj = sj?.hooks;
     if (hooksObj && typeof hooksObj === "object") {
+      // CC hook entries come in two shapes:
+      //   legacy flat:  { type, command }
+      //   nested:       { matcher, hooks: [{ type, command }, ...] }
+      // init writes the nested form (what CC expects); this check must
+      // match both so legacy installs verify too.
+      const containsBridge = (cmd: unknown): boolean =>
+        typeof cmd === "string" && cmd.includes("claude-ide-bridge");
+      const matches = (entry: unknown): boolean => {
+        if (!entry || typeof entry !== "object") return false;
+        const e = entry as { command?: unknown; hooks?: unknown };
+        if (containsBridge(e.command)) return true;
+        if (Array.isArray(e.hooks)) {
+          return e.hooks.some((h) =>
+            containsBridge((h as { command?: unknown })?.command),
+          );
+        }
+        return false;
+      };
       hooksWired = (
         Object.values(hooksObj as Record<string, unknown[]>).flat() as unknown[]
-      ).some(
-        (e) =>
-          typeof (e as Record<string, string | undefined>)?.command ===
-            "string" &&
-          ((e as Record<string, string>).command ?? "").includes(
-            "claude-ide-bridge",
-          ),
-      );
+      ).some(matches);
     }
   } catch {
     /* file may not exist yet — non-fatal */
   }
+  const settingsLabel = claudeConfigDirIsCustom()
+    ? path.join(getClaudeConfigDir(), "settings.json")
+    : "~/.claude/settings.json";
   process.stdout.write(
     hooksWired
-      ? "  ✓ CC hooks wired in ~/.claude/settings.json\n"
-      : "  ✗ CC hooks not wired — re-run init to add them\n",
+      ? `  ✓ CC hooks wired in ${settingsLabel}\n`
+      : `  ✗ CC hooks not wired in ${settingsLabel} — re-run init to add them\n`,
   );
   if (!hooksWired) {
     initFailures.push({
       step: "Claude Code hooks wiring",
-      detail:
-        "No claude-ide-bridge entry found in ~/.claude/settings.json hooks",
+      detail: `No claude-ide-bridge entry found in ${settingsLabel} hooks`,
       fix: "Re-run `claude-ide-bridge init`. If settings.json already exists, check it for a conflicting hooks block.",
       severity: "optional",
     });

@@ -227,6 +227,44 @@ describe("init --workspace", () => {
     expect(parsed.mcpServers).toBeDefined();
     expect(parsed.mcpServers?.["claude-ide-bridge"]).toBeDefined();
   });
+
+  it("honors CLAUDE_CONFIG_DIR for both writes and verification", () => {
+    const base = makeTmpDir();
+    const ws = path.join(base, "ws");
+    const customConfigDir = path.join(base, "customclaude");
+    // init expects the config dir to exist (same assumption as ~/.claude).
+    fs.mkdirSync(customConfigDir, { recursive: true });
+
+    const result = spawnSync("node", [distIndex, "init", "--workspace", ws], {
+      input: "n\n",
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        CLAUDE_CONFIG_DIR: customConfigDir,
+        CLAUDE_CODE_IDE_SKIP_VALID_CHECK: "true",
+      },
+      timeout: 30_000,
+    });
+
+    // Exit 0 means verification passed AND no critical failures were queued.
+    expect(result.status).toBe(0);
+
+    // Writes landed at custom paths
+    expect(fs.existsSync(`${customConfigDir}.json`)).toBe(true);
+    expect(fs.existsSync(path.join(customConfigDir, "settings.json"))).toBe(
+      true,
+    );
+
+    // Verification output shows the resolved paths (not "~/.claude...")
+    expect(result.stdout).toContain(
+      `MCP shim registered in ${customConfigDir}.json`,
+    );
+    expect(result.stdout).toContain(
+      `CC hooks wired in ${path.join(customConfigDir, "settings.json")}`,
+    );
+    expect(result.stdout).not.toContain("CC hooks not wired");
+    expect(result.stdout).not.toContain("MCP shim not found");
+  });
 });
 
 // ---------------------------------------------------------------------------
