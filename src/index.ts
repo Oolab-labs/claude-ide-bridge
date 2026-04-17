@@ -30,6 +30,11 @@ import {
   repairBridgeToolsRulesIfStale,
 } from "./bridgeToolsRules.js";
 import { findEditor, parseConfig } from "./config.js";
+import {
+  formatRecommendation,
+  probeIdeEnvironment,
+  recommendMode,
+} from "./probes/ideProbe.js";
 import { PACKAGE_VERSION, semverGt } from "./version.js";
 
 const __dirnameTop = path.dirname(fileURLToPath(import.meta.url));
@@ -864,10 +869,12 @@ Usage: claude-ide-bridge init [options]
 
 Options:
   --workspace <path>  Target workspace folder (default: cwd)
+  --headless          Skip VS Code extension install; recommend full mode
+                      (for servers, containers, CI, non-VS Code editors)
   --help              Show this help
 
 Steps performed:
-  1. Install the companion VS Code extension
+  1. Install the companion VS Code extension (skipped with --headless)
   2. Write bridge section to CLAUDE.md
   3. Write .claude/rules/bridge-tools.md
   4. Register MCP shim in ~/.claude.json
@@ -882,6 +889,7 @@ Steps performed:
     workspaceIdx !== -1 && argv[workspaceIdx + 1]
       ? path.resolve(argv[workspaceIdx + 1] as string)
       : process.cwd();
+  const headless = argv.includes("--headless");
 
   process.stderr.write("Claude IDE Bridge — setup\n\n");
 
@@ -900,9 +908,13 @@ Steps performed:
         }
       })());
 
-  // Step 1: Install extension
-  const editor = findEditor();
-  if (!editor) {
+  // Step 1: Install extension (skipped in headless mode)
+  const editor = headless ? null : findEditor();
+  if (headless) {
+    process.stderr.write(
+      "  [skip] Extension install — --headless mode (no VS Code integration).\n\n",
+    );
+  } else if (!editor) {
     const wslHint = isWsl
       ? "\n         WSL detected: ensure VS Code is installed on the Windows host and\n" +
         "         the Remote - WSL extension is active. Then re-run init.\n" +
@@ -1243,20 +1255,40 @@ Steps performed:
     /* no .git at workspace — not a git repo, fine */
   }
 
-  process.stdout.write(
-    "\n✅ Setup complete.\n\n" +
-      "Next steps:\n" +
-      `  1. Start the bridge:    claude-ide-bridge --watch   (runs in this workspace)\n` +
-      "  2. Restart your IDE once so it picks up the new extension + MCP config.\n" +
-      "  3. Open Claude Code and type /mcp — the claude-ide-bridge server should show as connected.\n" +
-      "  4. Type /ide to see live workspace state (open editors, diagnostics, git status).\n\n" +
-      "Cowork (computer-use) users — bridge MCP tools are NOT available inside Cowork.\n" +
-      "  Before switching to Cowork, run this in regular Claude Code/Desktop:\n" +
-      "    /mcp__bridge__cowork        (captures IDE context to a handoff note)\n" +
-      "  Or from the shell:\n" +
-      "    claude-ide-bridge cowork-prep\n" +
-      "  Docs: docs/cowork.md\n\n",
-  );
+  try {
+    const env = headless
+      ? { ...probeIdeEnvironment(null), isHeadless: true }
+      : probeIdeEnvironment(editor);
+    const rec = recommendMode(env);
+    process.stdout.write(formatRecommendation(rec));
+  } catch {}
+
+  if (headless) {
+    process.stdout.write(
+      "\n✅ Setup complete (headless mode).\n\n" +
+        "Next steps:\n" +
+        `  1. Start the bridge:    claude-ide-bridge --watch --full\n` +
+        "  2. From Claude Code, type /mcp — the claude-ide-bridge server should show as connected.\n" +
+        "  3. LSP tools fall back to typescript-language-server when available;\n" +
+        "     install with: npm install -g typescript-language-server typescript\n\n" +
+        "See docs/headless-quickstart.md for code-server / Docker patterns.\n\n",
+    );
+  } else {
+    process.stdout.write(
+      "\n✅ Setup complete.\n\n" +
+        "Next steps:\n" +
+        `  1. Start the bridge:    claude-ide-bridge --watch   (runs in this workspace)\n` +
+        "  2. Restart your IDE once so it picks up the new extension + MCP config.\n" +
+        "  3. Open Claude Code and type /mcp — the claude-ide-bridge server should show as connected.\n" +
+        "  4. Type /ide to see live workspace state (open editors, diagnostics, git status).\n\n" +
+        "Cowork (computer-use) users — bridge MCP tools are NOT available inside Cowork.\n" +
+        "  Before switching to Cowork, run this in regular Claude Code/Desktop:\n" +
+        "    /mcp__bridge__cowork        (captures IDE context to a handoff note)\n" +
+        "  Or from the shell:\n" +
+        "    claude-ide-bridge cowork-prep\n" +
+        "  Docs: docs/cowork.md\n\n",
+    );
+  }
 
   if (inWorktree) {
     process.stdout.write(

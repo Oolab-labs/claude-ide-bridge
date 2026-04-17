@@ -105,6 +105,13 @@ export interface PluginManifest {
   name: string;
   /** Plugin semver version string. Used in log output. */
   version?: string;
+  /**
+   * Optional: minimum bridge protocol version the plugin requires. Accepts
+   * either an exact version ("1.1.0") or a caret range ("^1.0.0" = same major).
+   * If omitted, the plugin is assumed compatible with any current-major
+   * protocol version. Cross-major mismatch is a hard-fail at load time.
+   */
+  requiresProtocolVersion?: string;
   /** Human-readable description shown at bridge startup. */
   description?: string;
   /** Relative path from the package root to the entrypoint module. */

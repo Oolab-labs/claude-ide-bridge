@@ -108,6 +108,8 @@ export class Server extends EventEmitter<ServerEvents> {
   public statusFn: (() => Record<string, unknown>) | null = null;
   /** Set by bridge to provide performance report data for /dashboard/data */
   public perfDataFn: (() => Record<string, unknown>) | null = null;
+  /** Set by bridge to provide recent (sanitized) activity feed for /dashboard/data */
+  public activityDataFn: (() => Array<Record<string, unknown>>) | null = null;
   /** Set by bridge to provide readiness data (MCP handshake complete, tool count, extension) */
   public readyFn:
     | (() => { ready: boolean; toolCount: number; extensionConnected: boolean })
@@ -409,6 +411,7 @@ export class Server extends EventEmitter<ServerEvents> {
             .extensionVersion,
           events: (status as { events?: unknown[] }).events ?? [],
           perf: this.perfDataFn?.() ?? null,
+          activity: this.activityDataFn?.() ?? [],
         };
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(data));
