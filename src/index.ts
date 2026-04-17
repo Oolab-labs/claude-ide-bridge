@@ -718,6 +718,15 @@ export function register(ctx) {
 if (process.argv[2] === "init") {
   const argv = process.argv.slice(3);
 
+  // Track critical init failures so the final summary can flag silent issues
+  // and exit non-zero instead of printing "✅ Setup complete" over warnings.
+  const initFailures: Array<{
+    step: string;
+    detail: string;
+    fix: string;
+    severity: "critical" | "optional";
+  }> = [];
+
   // Handle init --help
   if (argv.includes("--help")) {
     console.log(`claude-ide-bridge init — One-command setup
@@ -807,8 +816,14 @@ Steps performed:
         process.stderr.write(`  ✓ Extension installed via ${editor}\n\n`);
       } catch {
         process.stderr.write(
-          `  [warn] Extension install failed — download manually from:\n         https://open-vsx.org/extension/${OPEN_VSX_PUBLISHER}/${OPEN_VSX_NAME}\n\n`,
+          `  [FAILED] Extension install via ${editor} — download manually from:\n         https://open-vsx.org/extension/${OPEN_VSX_PUBLISHER}/${OPEN_VSX_NAME}\n\n`,
         );
+        initFailures.push({
+          step: "VS Code extension install",
+          detail: `${editor} --install-extension returned non-zero`,
+          fix: `Install manually: download .vsix from https://open-vsx.org/extension/${OPEN_VSX_PUBLISHER}/${OPEN_VSX_NAME} and run: ${editor} --install-extension <path>`,
+          severity: "critical",
+        });
       } finally {
         if (tmpVsix2) {
           try {
@@ -820,8 +835,14 @@ Steps performed:
       }
     } else {
       process.stderr.write(
-        `  [warn] Could not download extension — install manually from:\n         https://open-vsx.org/extension/${OPEN_VSX_PUBLISHER}/${OPEN_VSX_NAME}\n\n`,
+        `  [FAILED] Could not download extension — install manually from:\n         https://open-vsx.org/extension/${OPEN_VSX_PUBLISHER}/${OPEN_VSX_NAME}\n\n`,
       );
+      initFailures.push({
+        step: "VS Code extension download",
+        detail: "Could not fetch .vsix from Open VSX",
+        fix: `Check network access to open-vsx.org, or install manually from https://open-vsx.org/extension/${OPEN_VSX_PUBLISHER}/${OPEN_VSX_NAME}`,
+        severity: "critical",
+      });
     }
   }
 
@@ -1123,6 +1144,14 @@ Steps performed:
       ? "  ✓ bridge on PATH\n"
       : '  ✗ bridge not on PATH — add npm global bin to your PATH (e.g. export PATH="$(npm bin -g):$PATH")\n',
   );
+  if (!shimOnPath) {
+    initFailures.push({
+      step: "bridge on PATH",
+      detail: "claude-ide-bridge binary not on $PATH",
+      fix: 'Add npm global bin to PATH: export PATH="$(npm bin -g):$PATH" (or npm bin -g && add to your shell rc)',
+      severity: "critical",
+    });
+  }
 
   let mcpWired = false;
   try {
@@ -1144,6 +1173,14 @@ Steps performed:
       ? "  ✓ MCP shim registered in ~/.claude.json\n"
       : "  ✗ MCP shim not found in ~/.claude.json — re-run init or check Step 3 output above\n",
   );
+  if (!mcpWired) {
+    initFailures.push({
+      step: "MCP shim registration",
+      detail: "claude-ide-bridge entry missing from ~/.claude.json mcpServers",
+      fix: "Re-run `claude-ide-bridge init`. If the problem persists, inspect ~/.claude.json and Step 3 output above for the specific write error.",
+      severity: "critical",
+    });
+  }
 
   let hooksWired = false;
   try {
@@ -1173,6 +1210,15 @@ Steps performed:
       ? "  ✓ CC hooks wired in ~/.claude/settings.json\n"
       : "  ✗ CC hooks not wired — re-run init to add them\n",
   );
+  if (!hooksWired) {
+    initFailures.push({
+      step: "Claude Code hooks wiring",
+      detail:
+        "No claude-ide-bridge entry found in ~/.claude/settings.json hooks",
+      fix: "Re-run `claude-ide-bridge init`. If settings.json already exists, check it for a conflicting hooks block.",
+      severity: "optional",
+    });
+  }
 
   // Auto-open automation docs when --workspace was provided
   if (workspaceIdx !== -1 && workspace) {
@@ -1226,6 +1272,33 @@ Steps performed:
         ? "  ✓ Analytics enabled — thank you.\n"
         : "  ✓ Analytics disabled — no data will be sent.\n",
     );
+  }
+
+  // ── Final init summary — surface silent failures loudly ───────────────────
+  const criticalFailures = initFailures.filter(
+    (f) => f.severity === "critical",
+  );
+  const optionalFailures = initFailures.filter(
+    (f) => f.severity === "optional",
+  );
+  if (initFailures.length > 0) {
+    process.stdout.write(
+      `\n${"━".repeat(60)}\nInit completed with ${criticalFailures.length} critical and ${optionalFailures.length} optional issue(s):\n\n`,
+    );
+    for (const f of criticalFailures) {
+      process.stdout.write(
+        `  ✗ [CRITICAL] ${f.step}\n     ${f.detail}\n     → ${f.fix}\n\n`,
+      );
+    }
+    for (const f of optionalFailures) {
+      process.stdout.write(
+        `  ⚠ [OPTIONAL] ${f.step}\n     ${f.detail}\n     → ${f.fix}\n\n`,
+      );
+    }
+    process.stdout.write(
+      `${"━".repeat(60)}\nRe-run \`claude-ide-bridge init\` after resolving the items above.\n\n`,
+    );
+    if (criticalFailures.length > 0) process.exit(1);
   }
 
   process.exit(0);
